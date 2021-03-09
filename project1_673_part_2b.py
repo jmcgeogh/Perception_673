@@ -298,7 +298,7 @@ def draw(img, imgpts):
 ###
 # Part if video creation
 # def visual(frames):
-#     path = '/home/elliottmcg/Desktop/School/Second Semester/Perception_673/frames/'
+#     path = ''
 #     img=[]
 #     for i in range(0,frames):
 #         img.append(cv2.imread(path+f'frame{i}.jpg'))
