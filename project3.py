@@ -14,12 +14,14 @@ import matplotlib as plt
 import matplotlib.cm as cmplt
 from matplotlib import pyplot as pyplt
 
+# Prompt user to select which image set to use
 print('Please select which set of images you would like to test')
 print('For data set 1, press 1')
 print('For data set 2, press 2')
 print('For data set 3, press 3')
 data_select = int(input('Make Your Selection: '))
 
+# Selection will set the K0, K1, D, base, focal, and offest values
 if data_select == 1:
     im0 = cv2.imread('im0_ds1.png')
     im1 = cv2.imread('im1_ds1.png')
@@ -69,7 +71,8 @@ else:
     print('Incorrect input')
     print('Exiting...')
     sys.exit()
-   
+
+# Function to scale the images   
 def scale(frame, percent):
     width = int(frame.shape[1] * percent / 100)
     height = int(frame.shape[0] * percent / 100)
@@ -77,9 +80,11 @@ def scale(frame, percent):
     resized = cv2.resize(frame, dim, interpolation = cv2.INTER_AREA)
     return resized
 
+# Scale the images down
 im0 = scale(im0, 25)
 im1 = scale(im1, 25)
 
+# Generate the keypoints in the immage with ORBs
 def keypoints(img0, img1):
     orb = cv2.ORB_create()
 
@@ -98,8 +103,9 @@ def keypoints(img0, img1):
 
     pts1 = []
     pts2 = []
+    # Get the first 100 keypoint matches
     for mat in matches[:100]:
-        # Get the matching keypoints for each of the images
+
         img1_idx = mat.queryIdx
         img2_idx = mat.trainIdx
         (x1, y1) = kp1[img1_idx].pt
@@ -107,10 +113,11 @@ def keypoints(img0, img1):
         pts1.append((x1, y1))
         pts2.append((x2, y2))
 
-    img4 = cv2.drawMatches(img0,kp1,img1,kp2,matches[:len(pts1)],None,flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
+    matches_ = cv2.drawMatches(img0,kp1,img1,kp2,matches[:len(pts1)],None,flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
     
-    return pts1, pts2, img4, key1, key2
+    return pts1, pts2, matches_, key1, key2
 
+# Function to generate the fundametal matrix
 def fundamental_matrix(pts1, pts2):
 
     n = len(pts1)
@@ -128,6 +135,7 @@ def fundamental_matrix(pts1, pts2):
     fmatrix = fmatrix.reshape((3, 3))    
     # print('rank', np.linalg.matrix_rank(fmatrix))
     
+    # Reduce rank of the f matrix to rank 2
     uf, sf, vfh = np.linalg.svd(fmatrix)
     smallest_f = list(sf).index(min(sf))
     sf[smallest_f] = 0
@@ -137,12 +145,14 @@ def fundamental_matrix(pts1, pts2):
     
     return f_reduced
 
+# Genrate the essential matrix
 def essential_matrix(f_matrix, K0, K1):
     
     e_matrix = np.matmul(np.matmul(K1.T, f_matrix), K0)
     
     return e_matrix
 
+# Generate the four poses for triangulation
 def camera_pose(e_matrix, K):
     
     u, s, vh = np.linalg.svd(e_matrix)
@@ -151,6 +161,7 @@ def camera_pose(e_matrix, K):
          [1, 0, 0],
          [0, 0, 1]])
     
+    # Translational matrices
     c1 = u[:,2]
     C1 = np.array([[c1[0], c1[1], c1[2]]])
     c2 = -u[:,2]
@@ -160,6 +171,7 @@ def camera_pose(e_matrix, K):
     c4 = -u[:,2]
     C4 = np.array([[c4[0], c4[1], c4[2]]])
     
+    # Rotational matrices
     R1 = np.matmul(np.matmul(u, W), vh)
     R2 = np.matmul(np.matmul(u, W), vh)
     R3 = np.matmul(np.matmul(u, W.T), vh)
@@ -169,6 +181,8 @@ def camera_pose(e_matrix, K):
     C_list = [C1, C2, C3, C4]
     R_correct = []
     C_correct = []
+    
+    # If det(R) = -1 make R->-R and C->-C
     n = 0
     for i in R_list:
         if np.linalg.det(i) < 0:
@@ -185,7 +199,8 @@ def camera_pose(e_matrix, K):
     I2 = np.append(I, C_correct[1].T, axis=1)
     I3 = np.append(I, C_correct[2].T, axis=1)
     I4 = np.append(I, C_correct[3].T, axis=1)
-
+    
+    # Poses
     P1 = np.matmul(np.matmul(K, R_correct[0]), I1)
     P2 = np.matmul(np.matmul(K, R_correct[1]), I2)
     P3 = np.matmul(np.matmul(K, R_correct[2]), I3)
@@ -195,6 +210,7 @@ def camera_pose(e_matrix, K):
     
     return P, R_correct, C_correct
 
+# Triangulate 3D pionts based on the first 2 poses
 def triangulation(pts1, pts2, P):
     
     X = []
@@ -214,6 +230,7 @@ def triangulation(pts1, pts2, P):
     
     return X
 
+# Based on the 3D points find the true T and R matrices
 def find_pose(Rs, Cs, X):
 
     check1 = []
@@ -241,28 +258,35 @@ def find_pose(Rs, Cs, X):
     
     return R, T
 
+# Compute SSD by hand with specified window size and offset
 def ssd(rect_img1, rect_img2):
-      
+    
+    # Grayscale images
     gray1 = cv2.cvtColor(rect_img1, cv2.COLOR_BGR2GRAY)
     gray2 = cv2.cvtColor(rect_img2, cv2.COLOR_BGR2GRAY)
     rows, cols = gray1.shape[:2]  
     
+    # Create blank image 
     disp = np.zeros((cols, rows), np.uint8)
     disp.shape = rows, cols
+
     window = 6
-       
     w_half = int(window / 2)    
     adjust = 255 / max_offset 
     adj_val = []
+    
+    # Loop through the images
+    print('Constructing SSD...')
     for y in range(w_half, rows - w_half):      
         print('rows left', (rows-w_half)-y)    
         for x in range(w_half, cols - w_half):
             best_offset = 0
             prev_ssd = None
+            # Loop through the offsets till the max
             for offset in range(max_offset):               
                 ssd = 0
                 diff = 0                                            
-                # window search
+                # Window search the second image for lowest SSD
                 for v in range(-w_half, w_half):
                     for u in range(-w_half, w_half):
                         diff = int(gray1[y+v, x+u]) - int(gray2[y+v, (x+u) - offset])  
@@ -276,11 +300,15 @@ def ssd(rect_img1, rect_img2):
                     prev_ssd = ssd
                     best_offset = offset
                             
+            # Create the disparity image
             disp[y, x] = int(best_offset * adjust)
             adj_val.append(best_offset * adjust)
     
+    # Normalize the values to the 0-255 range
     norm_disp = cv2.normalize(disp, disp, alpha=255,
                                beta=0, norm_type=cv2.NORM_MINMAX)
+    
+    # Check that the normalization works
     # print(max(adj_val))
     # norm_val = []
     # for y in range(rows):
@@ -290,13 +318,15 @@ def ssd(rect_img1, rect_img2):
     # print('after norm', max(norm_val))      
     return norm_disp
 
-
+# Generate the depth image from the disparity
 def depth(image):
     
-    rows, cols = image.shape[:2]  
-    
+    rows, cols = image.shape[:2]     
     depth_image = np.zeros((cols, rows), np.uint8)
     depth_image.shape = rows, cols
+    
+    # Loop through the disparity image to generate the depth image
+    # Depth equation is Z = (focal length * Baseline)/Disparity
     Z_val = []
     for y in range(rows):
         for x in range(cols):
@@ -308,9 +338,11 @@ def depth(image):
                 Z_val.append(Z)
                 depth_image[y, x] = Z
     
+    # Normalize the values to the 0-255 range
     norm_depth = cv2.normalize(depth_image, depth_image, alpha=255,
                                beta=0, norm_type=cv2.NORM_MINMAX)
     
+    # Check that the normalization works
     # print('before norm', max(Z_val))
     # norm_val = []
     # for y in range(rows):
@@ -321,83 +353,76 @@ def depth(image):
     return norm_depth
 
 #####Part 1#####
+# Call the keypoints function
 pts1, pts2, match, key1, key2 = keypoints(im0, im1)
 cv2.imshow('Left KeyPoints', key1)
-# cv2.imwrite('Left_KeyPoints.jpg', key1)
-cv2.waitKey(0)
+# cv2.imwrite('DS3_Left_KeyPoints.jpg', key1)
 cv2.imshow('Right KeyPoints', key2)
-# cv2.imwrite('Right_KeyPoints.jpg', key2)
-cv2.waitKey(0)
+# cv2.imwrite('DS3_Right_KeyPoints.jpg', key2)
 cv2.imshow('Original Matching Points', match)
-# cv2.imwrite('Original_Matching_Points.jpg', match)
+# cv2.imwrite('DS3_Original_Matching_Points.jpg', match)
 cv2.waitKey(0)
 
+# Call the functions to generate the R and T matrices without inbuilt functions
 f_matrix = fundamental_matrix(pts1, pts2)
 e_matrix = essential_matrix(f_matrix, K0, K1)
 P, R_list, C_list = camera_pose(e_matrix, K0)
 X = triangulation(pts1, pts2, P)
 R, T = find_pose(R_list, C_list, X)
 
-
 #####Part 2#####
+# Generate the fundamental matrix with the inbuilt function for better accuracy
 method=cv2.FM_RANSAC
 fundamental_matrix, inliers = cv2.findFundamentalMat(
-            np.float32(pts1),
-            np.float32(pts2),
-            method=method,
-        )
+            np.float32(pts1), np.float32(pts2), method=method)
+
 pts1 = np.array(pts1)
 pts2 = np.array(pts2)
 h1, w1 = im0.shape[:2]
 h2, w2 = im1.shape[:2]
-_, H1, H2 = cv2.stereoRectifyUncalibrated(pts1, pts2, fundamental_matrix, imgSize=(w1, h1))
 
+# Rectify the images
+_, H1, H2 = cv2.stereoRectifyUncalibrated(pts1, pts2, fundamental_matrix, imgSize=(w1, h1))
 img1_rectified = cv2.warpPerspective(im0, H1, (w1, h1))
 img2_rectified = cv2.warpPerspective(im1, H2, (w2, h2))
 cv2.imshow("Left Rectified ", img1_rectified)
 cv2.imshow("Right Rectified", img2_rectified)
-# cv2.imwrite('rect1.jpg', img1_rectified)
-# cv2.imwrite('rect2.jpg', img2_rectified)
+# cv2.imwrite('DS3_rect1.jpg', img1_rectified)
+# cv2.imwrite('DS3_rect2.jpg', img2_rectified)
 cv2.waitKey(0)
 
+# Create keypoints and matching for the new rectified images
 rect_pts1, rect_pts2, rect_match, rect_key1, rect_key2 = keypoints(img1_rectified, img2_rectified)
 cv2.imshow('Warped Left KeyPoints', rect_key1)
-# cv2.imwrite('Warped_Left_KeyPoints.jpg', rect_key1)
-cv2.waitKey(0)
+# cv2.imwrite('DS3_Warped_Left_KeyPoints.jpg', rect_key1)
 cv2.imshow('Warped Right KeyPoints', rect_key2)
-# cv2.imwrite('Warped_Right_KeyPoints.jpg', rect_key2)
-cv2.waitKey(0)
+# cv2.imwrite('DS3_Warped_Right_KeyPoints.jpg', rect_key2)
 cv2.imshow('Warped Matching Points', rect_match)
-# cv2.imwrite('Warped_Matching_Points.jpg', rect_match)
+# cv2.imwrite('DS3_Warped_Matching_Points.jpg', rect_match)
 cv2.waitKey(0)
 
 #####Part 3#####
+# Call function for SSD
 ssd_image = ssd(img1_rectified, img2_rectified)
 cv2.imshow('SSD Disparity Image', ssd_image)
-# cv2.imwrite('ssd.jpg', ssd_image)
-# cv2.waitKey(0)
+# cv2.imwrite('DS3_ssd.jpg', ssd_image)
 
+# Call function for heatmap conversion
 heatmap = cv2.applyColorMap(ssd_image, colormap=cv2.COLORMAP_JET)
 cv2.imshow('Disparity Heatmap', heatmap)
-# cv2.imwrite('heatmap.jpg', heatmap)
-# cv2.waitKey(0)
+# cv2.imwrite('DS3_heatmap.jpg', heatmap)
+cv2.waitKey(0)
 
-#####Part 4##### 
-# imgL = cv2.imread('rect1.jpg',0)
-# imgR = cv2.imread('rect2.jpg',0)
-# stereo = cv2.StereoBM_create(numDisparities=16, blockSize=15)
-# disparity = stereo.compute(imgL,imgR)
-# pyplt.figure(1)
-# pyplt.imshow(disparity,'gray')
-# pyplt.figure(2)
-# pyplt.imshow(disparity,'plasma')
-# pyplt.show()
+#####Part 4#####
+# Call function for the depth map 
 depth_image = depth(ssd_image)
 cv2.imshow('Depth', depth_image)
-# cv2.imwrite('depth.jpg', depth_image)
-cv2.waitKey(0)
+# cv2.imwrite('DS3_depth.jpg', depth_image)
+
+# Call function for heatmap conversion
 depth_heatmap = cv2.applyColorMap(depth_image, colormap=cv2.COLORMAP_JET)
 cv2.imshow('Depth Heatmap', depth_heatmap)
-# cv2.imwrite('depth_heatmap.jpg', depth_heatmap)
+# cv2.imwrite('DS3_depth_heatmap.jpg', depth_heatmap)
 cv2.waitKey(0)
+
 cv2.destroyAllWindows()
